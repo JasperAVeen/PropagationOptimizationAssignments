@@ -78,33 +78,64 @@ void printSemiAnalyticalHodographicShapeToFile(
 std::shared_ptr< IntegratorSettings< > > getIntegratorSettings(
         unsigned int i, unsigned int j, unsigned int k, double simulationStartEpoch )
 {
-    // Define list of multi-stage integrators (for convenience)
-    std::vector< RungeKuttaCoefficients::CoefficientSets > multiStageTypes =
-    { RungeKuttaCoefficients::rungeKuttaFehlberg45,
-      RungeKuttaCoefficients::rungeKuttaFehlberg56,
-      RungeKuttaCoefficients::rungeKuttaFehlberg78,
-      RungeKuttaCoefficients::rungeKutta87DormandPrince };
-
-    // Create integrator settings (multi-stage variable-step)
-    if( j < 4 )
     {
-        // Extract integrator type and tolerance for current run
-        RungeKuttaCoefficients::CoefficientSets currentCoefficientSet = multiStageTypes.at( j );
-        double currentTolerance = std::pow( 10.0, ( -10.0 + static_cast< double >( k ) ) );
+        // Define list of multi-stage integrators (for convenience)
+        std::vector< RungeKuttaCoefficients::CoefficientSets > multiStageTypes =
+        { RungeKuttaCoefficients::rungeKuttaFehlberg45,
+          RungeKuttaCoefficients::rungeKuttaFehlberg56,
+          RungeKuttaCoefficients::rungeKuttaFehlberg78,
+          RungeKuttaCoefficients::rungeKutta87DormandPrince };
 
-        // Create integrator settings
-        return std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
-                    simulationStartEpoch, 1.0, currentCoefficientSet,
-                    std::numeric_limits< double >::epsilon( ), std::numeric_limits< double >::infinity( ),
-                    currentTolerance, currentTolerance );
+        //create integrator settings for fixed-time step integrators
+        double infTolerance = std::numeric_limits< double >::infinity( );
 
-    }
-    // Create integrator settings (multi-stage fixed-step)
-    else
-    {
-        // Create integrator settings
-        double timeStep = 7200.0 * std::pow( 2, k );
-        return std::make_shared< IntegratorSettings< > >( rungeKutta4, simulationStartEpoch, timeStep );
+
+        if(j==0){
+            double currentTolerance = std::pow( 10.0,  -8) ;
+            return std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
+                        simulationStartEpoch, 1.0, RungeKuttaCoefficients::rungeKutta87DormandPrince,
+                        std::numeric_limits< double >::epsilon( ), std::numeric_limits< double >::infinity( ),
+                        currentTolerance, currentTolerance );
+        }
+
+
+        else if (j==1){
+            double tolerance = std::pow( 10.0, -10 );
+            return std::make_shared< BulirschStoerIntegratorSettings<double> >(
+                                        simulationStartEpoch, 5 * 3600.0,
+                                        numerical_integrators::bulirsch_stoer_sequence, 4,
+                                        std::numeric_limits< double >::epsilon( ), 30*86400.0,
+                                        tolerance, tolerance);
+
+        }
+        else if (j==2){
+            double tolerance = std::pow( 10.0, -8 );
+            return std::make_shared< BulirschStoerIntegratorSettings<double> >(
+                                        simulationStartEpoch, 5 * 3600.0,
+                                        numerical_integrators::bulirsch_stoer_sequence, 6,
+                                        std::numeric_limits< double >::epsilon( ), 30*86400.0,
+                                        tolerance, tolerance);
+        }
+        else if (j==3){
+            double timeStep = 16*86400.0;
+            return std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
+                        simulationStartEpoch, timeStep, RungeKuttaCoefficients::rungeKuttaFehlberg78,
+                        timeStep, timeStep,
+                        infTolerance, infTolerance );
+        }
+        else if (j==4){
+            double timeStep = 16*86400.0;
+            return std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
+                        simulationStartEpoch, timeStep, RungeKuttaCoefficients::rungeKutta87DormandPrince,
+                        timeStep, timeStep,
+                        infTolerance, infTolerance );
+        }
+
+        else {
+            std::cout<<"Error in j "<<std::endl;
+        }
+
+
     }
 }
 
@@ -122,11 +153,22 @@ std::shared_ptr< DependentVariableSaveSettings > getDependentVariableSaveSetting
     // Define dependent variables
     std::vector< std::shared_ptr< SingleDependentVariableSaveSettings > > dependentVariablesList;
     dependentVariablesList.push_back( std::make_shared< SingleDependentVariableSaveSettings >(
+            keplerian_state_dependent_variable, "Vehicle", "Sun") );
+    dependentVariablesList.push_back( std::make_shared< SingleDependentVariableSaveSettings >(
                                           relative_distance_dependent_variable, "Vehicle", "Earth" ) );
     dependentVariablesList.push_back( std::make_shared< SingleDependentVariableSaveSettings >(
                                           relative_distance_dependent_variable, "Vehicle", "Sun" ) );
     dependentVariablesList.push_back( std::make_shared< SingleDependentVariableSaveSettings >(
                                           relative_distance_dependent_variable, "Vehicle", "Mars" ) );
+    dependentVariablesList.push_back(
+        std::make_shared< SingleAccelerationDependentVariableSaveSettings >(
+        central_gravity, "Vehicle", "Sun", true ));
+    dependentVariablesList.push_back(
+        std::make_shared< SingleAccelerationDependentVariableSaveSettings >(
+        point_mass_gravity, "Vehicle", "Earth", true ));
+    dependentVariablesList.push_back(
+        std::make_shared< SingleAccelerationDependentVariableSaveSettings >(
+        point_mass_gravity, "Vehicle", "Mars", true ));
     return std::make_shared< DependentVariableSaveSettings >( dependentVariablesList, false );
 }
 
@@ -159,10 +201,10 @@ std::vector< std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorX
         const double simulationStartEpoch, const double specificImpulse, const double minimumMarsDistance,
         const double timeBuffer,const simulation_setup::NamedBodyMap& bodyMap,
         const std::shared_ptr< MultiTypePropagatorSettings< double > > benchmarkPropagatorSettings,
-        std::vector< double > trajectoryParameters, std::string outputPath )
+        std::vector< double > trajectoryParameters, std::string outputPath ) // added double stepsize
 {
     // Create integrator settings for 1st run
-    double firstBenchmarkStepSize = 86400.0;
+    double firstBenchmarkStepSize = 90*3600.0;
     std::shared_ptr< IntegratorSettings< > > benchmarkIntegratorSettings;
     benchmarkIntegratorSettings = std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
                 simulationStartEpoch, firstBenchmarkStepSize, RungeKuttaCoefficients::rungeKutta87DormandPrince,
@@ -176,7 +218,7 @@ std::vector< std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorX
     probBenchmarkFirst.fitness( trajectoryParameters );
 
     // Create integrator settings for 2nd run
-    double secondBenchmarkStepSize = 2.0 * 86400.0;
+    double secondBenchmarkStepSize = 90*3600.0; // added stepsize ipv 2.0 * 86400.0
     benchmarkIntegratorSettings = std::make_shared< RungeKuttaVariableStepSizeSettings< > >(
                 simulationStartEpoch, secondBenchmarkStepSize, RungeKuttaCoefficients::rungeKutta87DormandPrince,
                 secondBenchmarkStepSize, secondBenchmarkStepSize,
@@ -200,9 +242,9 @@ std::vector< std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorX
 
     // Write the state maps of both benchmarks to files
     input_output::writeDataMapToTextFile( firstBenchmarkStates, "benchmark1.dat", outputPath );
-    input_output::writeDataMapToTextFile( secondBenchmarkStates, "benchmark2.dat", outputPath );
-    input_output::writeDataMapToTextFile( firstBenchmarkDependent, "benchmarkDependent_1.dat", outputPath );
-    input_output::writeDataMapToTextFile( secondBenchmarkDependent, "benchmarkDependent_2.dat", outputPath );
+    input_output::writeDataMapToTextFile( secondBenchmarkStates, "benchmark2BM.dat", outputPath );
+    input_output::writeDataMapToTextFile( firstBenchmarkDependent, "BBBbenchmarkDependent_1.dat", outputPath );
+    input_output::writeDataMapToTextFile( secondBenchmarkDependent, "benchmarkDependentBM_2.dat", outputPath );
 
     // Create 8th-order Lagrange interpolators for states and dependent variables of both runs
     std::shared_ptr< InterpolatorSettings > interpolatorSettings = std::make_shared< LagrangeInterpolatorSettings >( 8 );
@@ -237,6 +279,49 @@ std::vector< std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorX
                                           "benchmarkStateDifference.dat", outputPath );
     input_output::writeDataMapToTextFile( dependentVariablesDifference,
                                           "benchmarkDependentDifference.dat", outputPath );
+
+  /*!
+    // Write the state maps of both benchmarks to files
+    input_output::writeDataMapToTextFile( firstBenchmarkStates, "benchmark1.dat", outputPath );
+    input_output::writeDataMapToTextFile( secondBenchmarkStates, std::to_string(int(denum))+ "_benchmark2.dat", outputPath );
+    input_output::writeDataMapToTextFile( firstBenchmarkDependent, "benchmarkDependent_1.dat", outputPath );
+    input_output::writeDataMapToTextFile( secondBenchmarkDependent, std::to_string(int(denum))+ "_benchmarkDependent_2.dat", outputPath );
+
+    // Create 8th-order Lagrange interpolators for states and dependent variables of both runs
+    std::shared_ptr< InterpolatorSettings > interpolatorSettings = std::make_shared< LagrangeInterpolatorSettings >( 8 );
+    std::vector< std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorXd > > > interpolators;
+
+    std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorXd > > firstStatesInterpolator =
+            createOneDimensionalInterpolator( firstBenchmarkStates, interpolatorSettings );
+    std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorXd > > secondStatesInterpolator =
+            createOneDimensionalInterpolator( secondBenchmarkStates, interpolatorSettings );
+    std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorXd > > firstDependentInterpolator =
+            createOneDimensionalInterpolator( firstBenchmarkDependent, interpolatorSettings );
+    std::shared_ptr< OneDimensionalInterpolator< double, Eigen::VectorXd > > secondDependentInterpolator =
+            createOneDimensionalInterpolator( secondBenchmarkDependent, interpolatorSettings );
+
+    std::cout << "Calculating the difference between the benchmarks..." << std::endl;
+    std::map< double, Eigen::VectorXd > statesDifference;
+    std::map< double, Eigen::VectorXd > dependentVariablesDifference;
+
+    // Calculate difference between two benchmarks, both for the states and the dependent variables
+    for( auto iterator = secondBenchmarkStates.begin(); iterator != secondBenchmarkStates.end(); iterator++ )
+    {
+        statesDifference[ iterator->first ] = firstStatesInterpolator->interpolate( iterator->first ) - iterator->second;
+    }
+
+    for( auto iterator = secondBenchmarkDependent.begin(); iterator != secondBenchmarkDependent.end(); iterator++ )
+    {
+        dependentVariablesDifference[ iterator->first ] = firstDependentInterpolator->interpolate( iterator->first ) - iterator->second;
+    }
+
+    // Write the difference in state and dependent variables between the two benchmarks to files
+    input_output::writeDataMapToTextFile( statesDifference,
+                                         std::to_string(int(denum))+ "_benchmarkStateDifference.dat", outputPath );
+    input_output::writeDataMapToTextFile( dependentVariablesDifference,
+                                          std::to_string(int(denum))+ "_benchmarkDependentDifference.dat", outputPath );
+ */
+
 
     // Return the interpolators for the first benchmark (can be changed to the second if needed)
     interpolators.push_back( firstStatesInterpolator );
@@ -294,7 +379,7 @@ int main( )
 
     // DEFINE PROBLEM INDEPENDENT VARIABLES HERE:
     std::vector< double > trajectoryParameters =
-    { 1.9567061e+03,  3.8159413e+02,  0, 8.9057206e+03,  2.6738965e+03, -2.9315045e+03, 1.5350545e+03, -3.8783905e+03,  4.3249334e+03 };
+    { 1217.210057,	360.77358,	0,	1749.667199,	7641.630298,	-3418.638683,	-5701.064472,	3845.322211,	-1772.862738};
 
     std::string outputPath = tudat_applications::getOutputPath( "LowThrust" );
     bool generateAndCompareToBenchmark = true;
@@ -307,7 +392,7 @@ int main( )
     double vehicleMass = 4.0E3;
     double specificImpulse = 3000.0;
     double minimumMarsDistance = 5.0E7;
-    double timeBuffer = 30.0 * physical_constants::JULIAN_DAY;
+    double timeBuffer = 25.0 * physical_constants::JULIAN_DAY;
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////     CREATE ENVIRONMENT                   //////////////////////////////////////////////////////
@@ -344,6 +429,12 @@ int main( )
     // Define acceleration model settings.
     std::map< std::string, std::vector< std::shared_ptr< AccelerationSettings > > > accelerationsOfVehicle;
     accelerationsOfVehicle[ "Sun" ].push_back( std::make_shared< AccelerationSettings >( central_gravity ) );
+    accelerationsOfVehicle[ "Earth" ].push_back( std::make_shared< AccelerationSettings >( point_mass_gravity ) );
+    accelerationsOfVehicle[ "Mars" ].push_back( std::make_shared< AccelerationSettings >( point_mass_gravity ) );
+    //accelerationsOfVehicle[ "Sun" ].push_back( std::make_shared< AccelerationSettings >( cannon_ball_radiation_pressure ) );
+
+
+
 
     accelerationsOfVehicle[ "Vehicle" ].push_back(
                 getThrustAccelerationSettingsFromParameters( trajectoryParameters, bodyMap ) );
@@ -399,8 +490,17 @@ int main( )
                     initialPropagationTime, specificImpulse, minimumMarsDistance, timeBuffer, bodyMap, benchmarkPropagatorSettings,
                     trajectoryParameters, outputPath );
 
-    }
+        /*! // Generate benchmark data
+        for (double denum = 1; denum < 8; denum++) {
+           double stepsize = (75*3600) + 5 * denum * 3600.0 ;
+        benchmarkInterpolators = generateBenchmarks(
+                    initialPropagationTime, specificImpulse, minimumMarsDistance, timeBuffer, bodyMap, benchmarkPropagatorSettings,
+                    trajectoryParameters, outputPath, stepsize, denum );
 
+        }*/
+
+    }
+/*
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////     PRINT DATA FOR HODOGRAPHIC SEMI-ANALYTICAL METHOD         /////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -445,9 +545,9 @@ int main( )
     //!
     //!  CODING NOTE: THE NUMBER, TYPES, SETTINGS OF PROPAGATORS/INTEGRATORS/INTEGRATOR STEPS,TOLERANCES,ETC. SHOULD BE MODIFIED FOR ASSIGNMENT 1
     //!
-    unsigned int numberOfPropagators = 7;
+    unsigned int numberOfPropagators = 4;
     unsigned int numberOfIntegrators = 5;
-    unsigned int numberOfIntegratorStepSizeSettings = 4;
+    unsigned int numberOfIntegratorStepSizeSettings = 1;
     for( unsigned int i = 0; i < numberOfPropagators; i++ )
     {
         // Define translational state propagation settings
@@ -467,11 +567,6 @@ int main( )
         // Iterate over all types of integrators
         for( unsigned int j = 0; j < numberOfIntegrators; j++ )
         {
-            // Change number of step sizes used for RK4
-            if( j >= 4 )
-            { numberOfIntegratorStepSizeSettings = 6; }
-            else
-            { numberOfIntegratorStepSizeSettings = 4; }
 
             // Iterate over all tolerances/step sizes
             for( unsigned int k = 0; k < numberOfIntegratorStepSizeSettings; k++ )
@@ -499,7 +594,7 @@ int main( )
                 int numberOfEvaluations =
                         prob.getLastRunDynamicsSimulator( )->getCumulativeNumberOfFunctionEvaluations( ).rbegin( )->second;
                 input_output::writeMatrixToFile( ( Eigen::MatrixXd( 1, 1 ) << numberOfEvaluations ).finished( ),
-                                                 "numberOfFunctionEvaluations.dat", 16, outputPath );
+                                                 "numberOfFunctionEvaluationsPropInt.dat", 16, outputPath );
 
                 // Write to file whether the simulation was run succesfully (true or false)
                 bool succesfullyRun = prob.getLastRunDynamicsSimulator( )->integrationCompletedSuccessfully( );
@@ -528,12 +623,21 @@ int main( )
 
                     // Write differences w.r.t. benchmarks to files
                     input_output::writeDataMapToTextFile(
-                                stateDifference, "stateDifferenceBenchmark.dat", outputPath );
+                                stateDifference,  "stateDifferenceBenchmarkPropInt.dat", outputPath );
                     input_output::writeDataMapToTextFile(
-                                depVarDifference, "dependentVariablesDifferenceBenchmark.dat", outputPath );
+                                depVarDifference, "dependentVariablesDifferenceBenchmarkPropInt.dat", outputPath );
 
                 }
             }
         }
     }
+    */
 }
+
+
+
+
+
+
+
+
